@@ -1,6 +1,6 @@
 # Flagrep
 
-![flagrep demo](https://jumpshare.com/embed/xd2B875sCpm39ragJxhN)
+![flagrep demo](./demo.gif)
 
 **Flagrep** is a high-performance, advanced search utility designed to uncover obfuscated and encoded strings within files and directories. Built entirely with **Go's standard library**, it demonstrates efficient system programming without relying on external dependencies.
 
