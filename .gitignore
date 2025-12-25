@@ -1,2 +1,7 @@
-task.mft
 flagrep
+task.mft
+*.out
+*.prof
+.vscode/
+go.work
+venv/
