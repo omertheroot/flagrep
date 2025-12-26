@@ -15,6 +15,20 @@ import (
 // returns decoded str
 type DecoderFunc func(string) (string, error)
 
+// isPrintableBytes checks if byte slice is mostly printable ASCII (≥70%)
+func isPrintableBytes(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	printable := 0
+	for _, b := range data {
+		if (b >= 32 && b <= 126) || b == '\n' || b == '\r' || b == '\t' {
+			printable++
+		}
+	}
+	return float64(printable)/float64(len(data)) >= 0.7
+}
+
 func getDecoders() map[string]DecoderFunc {
 	return map[string]DecoderFunc{
 		"reverse":            reverseDecoder,
@@ -55,29 +69,134 @@ func spaceRemovalDecoder(input string) (string, error) {
 }
 
 // "SGVsbG8=" -> "Hello"
+// Also finds Base64 segments embedded within text: "random SGVsbG8= text" -> "random Hello text"
 func base64Decoder(input string) (string, error) {
-	data, err := base64.StdEncoding.DecodeString(input)
-	if err != nil {
-		return "", err
+	// First, try decoding the whole input
+	if data, err := base64.StdEncoding.DecodeString(input); err == nil {
+		if isPrintableBytes(data) {
+			return string(data), nil
+		}
 	}
-	return string(data), nil
+
+	// Fall back to finding embedded Base64 segments
+	re := regexp.MustCompile(`[A-Za-z0-9+/]{8,}={0,2}`)
+	matches := re.FindAllStringIndex(input, -1)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no base64 found")
+	}
+
+	result := input
+	anyDecoded := false
+
+	for i := len(matches) - 1; i >= 0; i-- {
+		start, end := matches[i][0], matches[i][1]
+		segment := input[start:end]
+
+		// Skip pure alphabetic words (likely regular text)
+		if regexp.MustCompile(`^[A-Za-z]+$`).MatchString(segment) {
+			continue
+		}
+
+		decoded, err := base64.StdEncoding.DecodeString(segment)
+		if err != nil {
+			decoded, err = base64.RawStdEncoding.DecodeString(segment)
+		}
+		if err != nil || !isPrintableBytes(decoded) {
+			continue
+		}
+
+		result = result[:start] + string(decoded) + result[end:]
+		anyDecoded = true
+	}
+
+	if !anyDecoded {
+		return "", fmt.Errorf("no valid base64 decoded")
+	}
+	return result, nil
 }
 
+// Also finds Base64URL segments embedded within text
 func base64URLDecoder(input string) (string, error) {
-	data, err := base64.URLEncoding.DecodeString(input)
-	if err != nil {
-		return "", err
+	// First, try decoding the whole input
+	if data, err := base64.URLEncoding.DecodeString(input); err == nil {
+		if isPrintableBytes(data) {
+			return string(data), nil
+		}
 	}
-	return string(data), nil
+
+	// Fall back to finding embedded Base64URL segments (uses - and _ instead of + and /)
+	re := regexp.MustCompile(`[A-Za-z0-9_-]{8,}={0,2}`)
+	matches := re.FindAllStringIndex(input, -1)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no base64url found")
+	}
+
+	result := input
+	anyDecoded := false
+
+	for i := len(matches) - 1; i >= 0; i-- {
+		start, end := matches[i][0], matches[i][1]
+		segment := input[start:end]
+
+		if regexp.MustCompile(`^[A-Za-z]+$`).MatchString(segment) {
+			continue
+		}
+
+		decoded, err := base64.URLEncoding.DecodeString(segment)
+		if err != nil {
+			decoded, err = base64.RawURLEncoding.DecodeString(segment)
+		}
+		if err != nil || !isPrintableBytes(decoded) {
+			continue
+		}
+
+		result = result[:start] + string(decoded) + result[end:]
+		anyDecoded = true
+	}
+
+	if !anyDecoded {
+		return "", fmt.Errorf("no valid base64url decoded")
+	}
+	return result, nil
 }
 
 // "JBSWY3DP" -> "Hello"
+// Also finds Base32 segments embedded within text
 func base32Decoder(input string) (string, error) {
-	data, err := base32.StdEncoding.DecodeString(input)
-	if err != nil {
-		return "", err
+	// First, try decoding the whole input
+	if data, err := base32.StdEncoding.DecodeString(strings.ToUpper(input)); err == nil {
+		if isPrintableBytes(data) {
+			return string(data), nil
+		}
 	}
-	return string(data), nil
+
+	// Fall back to finding embedded Base32 segments
+	re := regexp.MustCompile(`[A-Z2-7]{8,}={0,6}`)
+	matches := re.FindAllStringIndex(strings.ToUpper(input), -1)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no base32 found")
+	}
+
+	result := input
+	anyDecoded := false
+
+	for i := len(matches) - 1; i >= 0; i-- {
+		start, end := matches[i][0], matches[i][1]
+		segment := strings.ToUpper(input[start:end])
+
+		decoded, err := base32.StdEncoding.DecodeString(segment)
+		if err != nil || !isPrintableBytes(decoded) {
+			continue
+		}
+
+		result = result[:start] + string(decoded) + result[end:]
+		anyDecoded = true
+	}
+
+	if !anyDecoded {
+		return "", fmt.Errorf("no valid base32 decoded")
+	}
+	return result, nil
 }
 
 // "48 65 6c 6c 6f" -> "Hello"
@@ -166,39 +285,133 @@ func rot47Decoder(input string) (string, error) {
 }
 
 // "01000001" -> "A"
+// Also finds binary segments embedded within text
 func binaryDecoder(input string) (string, error) {
+	// First, try decoding the whole input
 	clean := strings.ReplaceAll(input, " ", "")
 	clean = strings.ReplaceAll(clean, "\n", "")
 	clean = strings.ReplaceAll(clean, "\r", "")
-	if len(clean)%8 != 0 {
-		return "", fmt.Errorf("invalid binary length: %d", len(clean))
-	}
-	var sb strings.Builder
-	for i := 0; i < len(clean); i += 8 {
-		val, err := strconv.ParseInt(clean[i:i+8], 2, 64)
-		if err != nil {
-			return "", err
+	if len(clean)%8 == 0 && regexp.MustCompile(`^[01]+$`).MatchString(clean) {
+		var sb strings.Builder
+		valid := true
+		for i := 0; i < len(clean); i += 8 {
+			val, err := strconv.ParseInt(clean[i:i+8], 2, 64)
+			if err != nil {
+				valid = false
+				break
+			}
+			sb.WriteByte(byte(val))
 		}
-		sb.WriteByte(byte(val))
+		if valid && isPrintableBytes([]byte(sb.String())) {
+			return sb.String(), nil
+		}
 	}
-	return sb.String(), nil
+
+	// Fall back to finding embedded binary segments (min 16 bits = 2 chars)
+	re := regexp.MustCompile(`[01]{16,}`)
+	matches := re.FindAllStringIndex(input, -1)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no binary found")
+	}
+
+	result := input
+	anyDecoded := false
+
+	for i := len(matches) - 1; i >= 0; i-- {
+		start, end := matches[i][0], matches[i][1]
+		segment := input[start:end]
+
+		// Trim to multiple of 8
+		truncLen := (len(segment) / 8) * 8
+		if truncLen < 8 {
+			continue
+		}
+		segment = segment[:truncLen]
+
+		var sb strings.Builder
+		valid := true
+		for j := 0; j < len(segment); j += 8 {
+			val, err := strconv.ParseInt(segment[j:j+8], 2, 64)
+			if err != nil {
+				valid = false
+				break
+			}
+			sb.WriteByte(byte(val))
+		}
+		if !valid || !isPrintableBytes([]byte(sb.String())) {
+			continue
+		}
+
+		result = result[:start] + sb.String() + result[start+truncLen:]
+		anyDecoded = true
+	}
+
+	if !anyDecoded {
+		return "", fmt.Errorf("no valid binary decoded")
+	}
+	return result, nil
 }
 
 // "101" -> "A"
+// Also finds octal segments embedded within text (space-separated octal bytes)
 func octalDecoder(input string) (string, error) {
-	parts := strings.Fields(input)
-	var sb strings.Builder
-	for _, part := range parts {
-		if len(part) > 3 {
-			return "", fmt.Errorf("invalid octal chunk")
+	// Find sequences of space-separated octal values (e.g., "110 145 154 154 157")
+	re := regexp.MustCompile(`\b([0-7]{1,3}(?:\s+[0-7]{1,3})+)\b`)
+	matches := re.FindAllStringIndex(input, -1)
+
+	if len(matches) == 0 {
+		// Try original whole-input approach
+		parts := strings.Fields(input)
+		if len(parts) == 0 {
+			return "", fmt.Errorf("no octal found")
 		}
-		val, err := strconv.ParseInt(part, 8, 64)
-		if err != nil {
-			return "", err
+		var sb strings.Builder
+		for _, part := range parts {
+			if len(part) > 3 {
+				return "", fmt.Errorf("invalid octal chunk")
+			}
+			val, err := strconv.ParseInt(part, 8, 64)
+			if err != nil {
+				return "", err
+			}
+			sb.WriteByte(byte(val))
 		}
-		sb.WriteByte(byte(val))
+		if isPrintableBytes([]byte(sb.String())) {
+			return sb.String(), nil
+		}
+		return "", fmt.Errorf("octal not printable")
 	}
-	return sb.String(), nil
+
+	result := input
+	anyDecoded := false
+
+	for i := len(matches) - 1; i >= 0; i-- {
+		start, end := matches[i][0], matches[i][1]
+		segment := input[start:end]
+		parts := strings.Fields(segment)
+
+		var sb strings.Builder
+		valid := true
+		for _, part := range parts {
+			val, err := strconv.ParseInt(part, 8, 64)
+			if err != nil || val > 255 {
+				valid = false
+				break
+			}
+			sb.WriteByte(byte(val))
+		}
+		if !valid || !isPrintableBytes([]byte(sb.String())) {
+			continue
+		}
+
+		result = result[:start] + sb.String() + result[end:]
+		anyDecoded = true
+	}
+
+	if !anyDecoded {
+		return "", fmt.Errorf("no valid octal decoded")
+	}
+	return result, nil
 }
 
 // "%20" -> " "
