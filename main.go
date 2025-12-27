@@ -134,7 +134,7 @@ func main() {
 	}
 
 	if !*tuiMode {
-		fmt.Println("*Expect false positives")
+		fmt.Println("[INFO] Expect false positives")
 	}
 
 	err = searcher.Run()
