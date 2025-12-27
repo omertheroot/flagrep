@@ -29,12 +29,15 @@ Flagrep utilizes Go's concurrency primitives (`goroutines` and `channels`) to im
 
 - **Recursive Directory Search**: efficiently walks file trees.
 - **Multi-Layer Decoding**: Automatically detects and reverses:
-  - **Ciphers**: ROT13, ROT47
-  - **Encodings**: Base64, Base32, Hexadecimal (various formats)
-  - **Obfuscation**: Reversed text, Spacing injection
+  - **Ciphers**: ROT13, ROT47, XOR (brute-force)
+  - **Encodings**: Base64, Base32, Hexadecimal (various formats), Binary, Octal
+  - **Obfuscation**: Reversed text, Spacing injection, URL encoding, HTML entities
 - **Grep-Compatible CLI**: Supports standard flags like `-r` (recursive), `-i` (ignore case), and context control (`-A`, `-B`, `-C`).
 - **Stdin Support**: seamlessly integrates into Unix pipes (e.g., `strings binary | flagrep pattern`).
 - **ANSI Color Highlighting**: Visually distinguishes matched patterns in the terminal.
+- **Shannon Entropy Filtering**: Filter files by entropy threshold to focus on encrypted/compressed content.
+- **Magic Bytes Detection**: Filter files by file type signature (ELF, MZ, PDF, PNG, etc.).
+- **Interactive TUI Mode**: Navigate results with keyboard controls in a terminal UI.
 
 ## Installation
  
@@ -74,6 +77,18 @@ strings malware.exe | ./flagrep "suspicious_string"
 # -workers: Set concurrency limit (default 10)
 # -depth: Set maximum decoding depth (default 2)
 ./flagrep -r -workers 50 -depth 3 "flag{" .
+
+# Entropy filtering (find high-entropy files like encrypted data)
+./flagrep -r -entropy-threshold 7.0 "key" /path/to/suspicious/
+
+# Magic bytes filtering (only scan ELF binaries)
+./flagrep -r -magic "ELF,MZ" "main" /usr/bin/
+
+# Interactive TUI mode (navigate results with j/k/Enter/q)
+./flagrep -tui -r "flag" ./ctf_challenge/
+
+# JSON output for scripting
+./flagrep -r -json "password" . | jq '.file'
 ```
 
 ## Supported Decoders
@@ -90,6 +105,16 @@ The following decoders are included:
 8. Hex with 0x prefix - "0x48 0x65 0x6c 0x6c 0x6f" → "Hello"
 9. ROT13 - rotates letters by 13 positions
 10. ROT47 - rotates ASCII printable characters by 47 positions
+11. Binary - "01001000" → "H"
+12. Octal - "110 145 154 154 157" → "Hello"
+13. URL - "%48%65%6c%6c%6f" → "Hello"
+14. HTML Entities - "&lt;" → "<"
+15. **XOR Brute-Force** - tries all single-byte XOR keys (0x01-0xFF)
+16. **Atbash Cipher** - alphabetic substitution (A↔Z, B↔Y)
+17. **Morse Code** - ".... . .-.. .-.. ---" → "HELLO"
+18. **Unicode Escapes** - "\u0048\u0065\u006c\u006c\u006f" → "Hello"
+19. **Base85/Ascii85** - compact binary-to-text encoding
+20. **Caesar/ROT-N** - brute-forces all 26 letter rotations
 
 The tool will try each decoder individually and in combinations to find hidden strings.
 
@@ -117,6 +142,59 @@ func getDecoders() map[string]DecoderFunc {
     }
 }
 ```
+
+## Advanced Features
+
+### Shannon Entropy Filtering
+
+Use `-entropy-threshold` to filter files by their Shannon entropy value. High entropy (>7.0) typically indicates encrypted, compressed, or random data.
+
+```bash
+# Find patterns in high-entropy files (likely encrypted/packed)
+./flagrep -r -entropy-threshold 6.5 -v "key" /suspicious/
+
+# Combined with verbose to see entropy values
+./flagrep -r -v -entropy-threshold 4.0 "password" .
+```
+
+**Entropy Ranges:**
+- 0-3.5: Low entropy (repetitive data, simple text)
+- 3.5-5.0: Normal text/code
+- 5.0-7.0: Compressed or binary data
+- 7.0-8.0: Encrypted or highly random data
+
+### Magic Bytes Filtering
+
+Use `-magic` to filter files by their file type signature instead of extension. Supports: `ELF`, `MZ`, `PDF`, `PNG`, `JPEG`, `GIF`, `ZIP`, `GZIP`, `RAR`, `7Z`, `SCRIPT`, `SQLITE`, and more.
+
+```bash
+# Only scan ELF binaries
+./flagrep -r -magic "ELF" "main" /usr/bin/
+
+# Scan multiple types
+./flagrep -r -magic "ELF,MZ,SCRIPT" "exec" /opt/
+```
+
+### Interactive TUI Mode
+
+Use `-tui` for an interactive terminal interface to browse results.
+
+```bash
+./flagrep -tui -r "flag{" ./ctf_challenge/
+```
+
+**Keyboard Controls:**
+- `j` / `k` / `↑` / `↓`: Navigate up/down
+- `n` / `p` / `PgDn` / `PgUp`: Next/previous page
+- `g` / `G`: Jump to first/last result
+- `/`: Search/filter results
+- `Esc`: Clear filter
+- `Enter` / `→`: Expand current match details
+- `y`: Copy match to clipboard
+- `o`: Open file in $EDITOR
+- `e`: Export results to file
+- `?`: Show help screen
+- `q`: Quit
 
 ## Use Cases
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,39 +12,62 @@ import (
 )
 
 type Searcher struct {
-	Paths         []string
-	Pattern       string
-	Recursive     bool
-	CaseSensitive bool
-	Concurrency   int
-	Depth         int
-	Verbose       bool
-	Decoders      map[string]DecoderFunc
-	Regexp        *regexp.Regexp
-	ContextBefore int
-	ContextAfter  int
+	Paths            []string
+	Pattern          string
+	Recursive        bool
+	CaseSensitive    bool
+	Concurrency      int
+	Depth            int
+	Verbose          bool
+	Decoders         map[string]DecoderFunc
+	Regexp           *regexp.Regexp
+	ContextBefore    int
+	ContextAfter     int
+	ExcludedDirs     []string
+	JsonOutput       bool
+	EntropyThreshold float64
+	MagicTypes       []string
+	TUIMode          bool
+	MatchCollector   *MatchCollector
 }
 
-func NewSearcher(paths []string, pattern string, recursive, caseSensitive bool, concurrency, depth, contextBefore, contextAfter int, verbose bool) *Searcher {
-	var re *regexp.Regexp
-	if caseSensitive {
-		re = regexp.MustCompile(regexp.QuoteMeta(pattern))
+func NewSearcher(paths []string, pattern string, recursive, caseSensitive, isRegex bool, concurrency, depth, contextBefore, contextAfter int, verbose, jsonOutput bool, excludedDirs []string, entropyThreshold float64, magicTypes []string, tuiMode bool) *Searcher {
+	var regexPattern string
+	if isRegex {
+		regexPattern = pattern
 	} else {
-		re = regexp.MustCompile("(?i)" + regexp.QuoteMeta(pattern))
+		regexPattern = regexp.QuoteMeta(pattern)
+	}
+
+	if !caseSensitive {
+		regexPattern = "(?i)" + regexPattern
+	}
+
+	re := regexp.MustCompile(regexPattern)
+
+	var collector *MatchCollector
+	if tuiMode {
+		collector = NewMatchCollector()
 	}
 
 	return &Searcher{
-		Paths:         paths,
-		Pattern:       pattern,
-		Recursive:     recursive,
-		CaseSensitive: caseSensitive,
-		Concurrency:   concurrency,
-		Depth:         depth,
-		ContextBefore: contextBefore,
-		ContextAfter:  contextAfter,
-		Verbose:       verbose,
-		Decoders:      getDecoders(),
-		Regexp:        re,
+		Paths:            paths,
+		Pattern:          pattern,
+		Recursive:        recursive,
+		CaseSensitive:    caseSensitive,
+		Concurrency:      concurrency,
+		Depth:            depth,
+		ContextBefore:    contextBefore,
+		ContextAfter:     contextAfter,
+		Verbose:          verbose,
+		Decoders:         getDecoders(),
+		Regexp:           re,
+		ExcludedDirs:     excludedDirs,
+		JsonOutput:       jsonOutput,
+		EntropyThreshold: entropyThreshold,
+		MagicTypes:       magicTypes,
+		TUIMode:          tuiMode,
+		MatchCollector:   collector,
 	}
 }
 
@@ -52,14 +76,15 @@ func (s *Searcher) Run() error {
 	var wg sync.WaitGroup
 
 	for i := 0; i < s.Concurrency; i++ {
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			for path := range fileChan {
 				s.processFile(path)
 			}
-		})
+		}()
 	}
 
-	// if no paths provided, read from stdin
 	if len(s.Paths) == 0 {
 		content, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -69,7 +94,6 @@ func (s *Searcher) Run() error {
 		return nil
 	}
 
-	// walk the directories and send files to the chan
 	for _, path := range s.Paths {
 		if path == "-" {
 			content, err := io.ReadAll(os.Stdin)
@@ -111,10 +135,22 @@ func (s *Searcher) walk(root string, fileChan chan<- string) error {
 			}
 			return nil
 		}
-		if !info.IsDir() {
+
+		if info.IsDir() {
+			base := filepath.Base(path)
+			for _, excluded := range s.ExcludedDirs {
+				if base == excluded {
+					if s.Verbose {
+						fmt.Printf("Skipping excluded directory: %s\n", path)
+					}
+					return filepath.SkipDir
+				}
+			}
+			if !s.Recursive && path != root {
+				return filepath.SkipDir
+			}
+		} else {
 			fileChan <- path
-		} else if !s.Recursive && path != root {
-			return filepath.SkipDir
 		}
 		return nil
 	})
@@ -127,6 +163,32 @@ func (s *Searcher) processFile(path string) {
 			fmt.Printf("Error reading file %s: %v\n", path, err)
 		}
 		return
+	}
+
+	if len(s.MagicTypes) > 0 {
+		if !MatchesMagicFilter(content, s.MagicTypes) {
+			detected := DetectMagic(content)
+			if s.Verbose {
+				fmt.Printf("Skipping %s (magic: %s, filter: %v)\n", path, detected, s.MagicTypes)
+			}
+			return
+		}
+		if s.Verbose {
+			fmt.Printf("Processing %s (magic: %s)\n", path, DetectMagic(content))
+		}
+	}
+
+	if s.EntropyThreshold > 0 {
+		entropy := CalculateEntropy(content)
+		if entropy < s.EntropyThreshold {
+			if s.Verbose {
+				fmt.Printf("Skipping %s (entropy %.2f < threshold %.2f)\n", path, entropy, s.EntropyThreshold)
+			}
+			return
+		}
+		if s.Verbose {
+			fmt.Printf("Processing %s (entropy %.2f >= threshold %.2f)\n", path, entropy, s.EntropyThreshold)
+		}
 	}
 
 	s.searchBFS(string(content), path)
@@ -151,16 +213,13 @@ func (s *Searcher) searchBFS(initialContent, path string) {
 		currentState := queue[0]
 		queue = queue[1:]
 		if s.matches(currentState.content) {
-			//found match
 			s.printMatch(path, currentState.appliedDecoders, currentState.content)
 		}
 
-		// stop if we reached max depth
 		if currentState.depth >= s.Depth {
 			continue
 		}
 
-		// generate next states
 		for name, decoder := range s.Decoders {
 			decoded, err := decoder(currentState.content)
 			if err == nil && decoded != "" && decoded != currentState.content {
@@ -193,7 +252,9 @@ func (s *Searcher) printMatch(path string, decoders []string, content string) {
 
 	for i, loc := range matches {
 		if i >= maxMatchesPerFile {
-			fmt.Printf("[MATCH] File: %s | Decoders: %s | ... and more matches ...\n", path, decoderStr)
+			if !s.JsonOutput && !s.TUIMode {
+				fmt.Printf("[MATCH] File: %s | Decoders: %s | ... and more matches ...\n", path, decoderStr)
+			}
 			break
 		}
 
@@ -203,21 +264,45 @@ func (s *Searcher) printMatch(path string, decoders []string, content string) {
 		start := max(matchIndex-s.ContextBefore, 0)
 		end := min(matchIndex+matchLen+s.ContextAfter, len(content))
 
-		// extract from original content
 		prefix := content[start:matchIndex]
 		match := content[matchIndex : matchIndex+matchLen]
 		suffix := content[matchIndex+matchLen : end]
+		context := prefix + match + suffix
 
-		// escape bad chars
-		prefix = strings.ReplaceAll(prefix, "\n", "\\n")
-		prefix = strings.ReplaceAll(prefix, "\r", "\\r")
-		match = strings.ReplaceAll(match, "\n", "\\n")
-		match = strings.ReplaceAll(match, "\r", "\\r")
-		suffix = strings.ReplaceAll(suffix, "\n", "\\n")
-		suffix = strings.ReplaceAll(suffix, "\r", "\\r")
+		if s.TUIMode && s.MatchCollector != nil {
+			s.MatchCollector.Add(path, decoders, match, context, matchIndex)
+			continue
+		}
 
-		formattedContent := fmt.Sprintf("%s\033[31m%s\033[0m%s", prefix, match, suffix)
+		if s.JsonOutput {
+			output := struct {
+				File     string   `json:"file"`
+				Decoders []string `json:"decoders"`
+				Match    string   `json:"match"`
+				Context  string   `json:"context"`
+				Offset   int      `json:"offset"`
+			}{
+				File:     path,
+				Decoders: decoders,
+				Match:    match,
+				Context:  context,
+				Offset:   matchIndex,
+			}
+			jsonBytes, err := json.Marshal(output)
+			if err == nil {
+				fmt.Println(string(jsonBytes))
+			}
+		} else {
+			prefix = strings.ReplaceAll(prefix, "\n", "\\n")
+			prefix = strings.ReplaceAll(prefix, "\r", "\\r")
+			match = strings.ReplaceAll(match, "\n", "\\n")
+			match = strings.ReplaceAll(match, "\r", "\\r")
+			suffix = strings.ReplaceAll(suffix, "\n", "\\n")
+			suffix = strings.ReplaceAll(suffix, "\r", "\\r")
 
-		fmt.Printf("[MATCH] File: %s | Decoders: %s | Content: ...%s...\n", path, decoderStr, formattedContent)
+			formattedContent := fmt.Sprintf("%s\033[31m%s\033[0m%s", prefix, match, suffix)
+
+			fmt.Printf("[MATCH] File: %s | Decoders: %s | Content: ...%s...\n", path, decoderStr, formattedContent)
+		}
 	}
 }
