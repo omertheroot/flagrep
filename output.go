@@ -45,7 +45,6 @@ func OpenDatabase(path string) (*SQLiteDatabase, error) {
 		Records: make([]SQLiteRecord, 0),
 	}
 
-	// Try to load existing database
 	if data, err := os.ReadFile(path); err == nil {
 		json.Unmarshal(data, db)
 	}
@@ -118,7 +117,6 @@ func (w *WatchMode) Run() error {
 	fmt.Printf("Watching for changes (interval: %v)...\n", w.interval)
 	fmt.Println("Press Ctrl+C to stop")
 
-	// Initial scan
 	w.scanAll()
 
 	ticker := time.NewTicker(w.interval)

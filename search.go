@@ -85,7 +85,6 @@ func (s *Searcher) Run() error {
 		}()
 	}
 
-	// if no paths provided, read from stdin
 	if len(s.Paths) == 0 {
 		content, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -95,7 +94,6 @@ func (s *Searcher) Run() error {
 		return nil
 	}
 
-	// walk the directories and send files to the chan
 	for _, path := range s.Paths {
 		if path == "-" {
 			content, err := io.ReadAll(os.Stdin)
@@ -167,7 +165,6 @@ func (s *Searcher) processFile(path string) {
 		return
 	}
 
-	// Skip files not matching magic filter if enabled
 	if len(s.MagicTypes) > 0 {
 		if !MatchesMagicFilter(content, s.MagicTypes) {
 			detected := DetectMagic(content)
@@ -181,7 +178,6 @@ func (s *Searcher) processFile(path string) {
 		}
 	}
 
-	// Skip files below entropy threshold if enabled
 	if s.EntropyThreshold > 0 {
 		entropy := CalculateEntropy(content)
 		if entropy < s.EntropyThreshold {
@@ -217,16 +213,13 @@ func (s *Searcher) searchBFS(initialContent, path string) {
 		currentState := queue[0]
 		queue = queue[1:]
 		if s.matches(currentState.content) {
-			//found match
 			s.printMatch(path, currentState.appliedDecoders, currentState.content)
 		}
 
-		// stop if we reached max depth
 		if currentState.depth >= s.Depth {
 			continue
 		}
 
-		// generate next states
 		for name, decoder := range s.Decoders {
 			decoded, err := decoder(currentState.content)
 			if err == nil && decoded != "" && decoded != currentState.content {
@@ -271,20 +264,17 @@ func (s *Searcher) printMatch(path string, decoders []string, content string) {
 		start := max(matchIndex-s.ContextBefore, 0)
 		end := min(matchIndex+matchLen+s.ContextAfter, len(content))
 
-		// extract from original content
 		prefix := content[start:matchIndex]
 		match := content[matchIndex : matchIndex+matchLen]
 		suffix := content[matchIndex+matchLen : end]
 		context := prefix + match + suffix
 
-		// TUI mode: collect matches instead of printing
 		if s.TUIMode && s.MatchCollector != nil {
 			s.MatchCollector.Add(path, decoders, match, context, matchIndex)
 			continue
 		}
 
 		if s.JsonOutput {
-			// Create a struct for JSON output
 			output := struct {
 				File     string   `json:"file"`
 				Decoders []string `json:"decoders"`
@@ -303,7 +293,6 @@ func (s *Searcher) printMatch(path string, decoders []string, content string) {
 				fmt.Println(string(jsonBytes))
 			}
 		} else {
-			// escape bad chars
 			prefix = strings.ReplaceAll(prefix, "\n", "\\n")
 			prefix = strings.ReplaceAll(prefix, "\r", "\\r")
 			match = strings.ReplaceAll(match, "\n", "\\n")

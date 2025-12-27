@@ -11,13 +11,11 @@ import (
 var version = "1.1.0"
 
 func main() {
-	// Load configuration
 	config, err := LoadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Could not load config: %v\n", err)
 	}
 
-	// Flags - defaults come from config
 	recursive := flag.Bool("r", config.Recursive, "Recursively search directories")
 	ignoreCase := flag.Bool("i", config.IgnoreCase, "Ignore case")
 	workers := flag.Int("workers", config.Workers, "Concurrency limit")
@@ -30,7 +28,6 @@ func main() {
 	var context int
 	flag.IntVar(&context, "C", config.Context, "Print NUM characters of output context")
 
-	// New flags
 	useRegex := flag.Bool("e", config.UseRegex, "Enable regex mode")
 	jsonOutput := flag.Bool("json", config.JSONOutput, "Enable JSON output")
 
@@ -45,7 +42,6 @@ func main() {
 	tuiMode := flag.Bool("tui", config.TUIMode, "Enable interactive TUI mode")
 	showVersion := flag.Bool("version", false, "Show version information")
 
-	// Profiling flags
 	cpuProfile := flag.String("cpuprofile", "", "Write CPU profile to file")
 	memProfile := flag.String("memprofile", "", "Write memory profile to file")
 
@@ -63,7 +59,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	// CPU Profiling
 	if *cpuProfile != "" {
 		f, err := os.Create(*cpuProfile)
 		if err != nil {
@@ -78,7 +73,6 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	// Memory Profiling
 	if *memProfile != "" {
 		defer func() {
 			f, err := os.Create(*memProfile)
@@ -87,7 +81,6 @@ func main() {
 				return
 			}
 			defer f.Close()
-			// runtime.GC() // get up-to-date statistics
 			if err := pprof.WriteHeapProfile(f); err != nil {
 				fmt.Fprintf(os.Stderr, "Could not write memory profile: %v\n", err)
 			}
@@ -103,7 +96,6 @@ func main() {
 	pattern := args[0]
 	paths := args[1:]
 
-	// if C is set, A and B are set to C, just like in grep
 	if context > 0 {
 		if afterContext == 0 {
 			afterContext = context
@@ -112,7 +104,6 @@ func main() {
 			beforeContext = context
 		}
 	}
-	// default is 10 chars before and 30 chars after (only if not set by config or flags)
 	if afterContext == 0 && beforeContext == 0 && context == 0 && config.AfterContext == 0 && config.BeforeContext == 0 {
 		beforeContext = 10
 		afterContext = 30
@@ -143,7 +134,6 @@ func main() {
 	}
 
 	if !*tuiMode {
-		// just in case
 		fmt.Println("*Expect false positives")
 	}
 
@@ -153,7 +143,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Launch TUI if enabled
 	if *tuiMode && searcher.MatchCollector != nil {
 		tui := NewTUI(searcher.MatchCollector.Matches)
 		tui.Run()

@@ -8,7 +8,6 @@ func CalculateEntropy(data []byte) float64 {
 		return 0
 	}
 
-	// Count byte frequencies
 	var freq [256]int
 	for _, b := range data {
 		freq[b]++

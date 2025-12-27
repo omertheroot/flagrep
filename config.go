@@ -62,7 +62,6 @@ func LoadConfig() (*Config, error) {
 
 // FindConfigFile looks for a config file in standard locations
 func FindConfigFile() string {
-	// Check current directory
 	if _, err := os.Stat(".flagreprc"); err == nil {
 		return ".flagreprc"
 	}
@@ -70,7 +69,6 @@ func FindConfigFile() string {
 		return ".flagrep.json"
 	}
 
-	// Check home directory
 	home, err := os.UserHomeDir()
 	if err == nil {
 		paths := []string{
@@ -102,7 +100,6 @@ func SaveConfig(config *Config, path string) error {
 // CreateSampleConfig creates a sample configuration file
 func CreateSampleConfig(path string) error {
 	config := DefaultConfig()
-	// Add some sample values for better user guidance
 	config.ExcludeDirs = append(config.ExcludeDirs, "dist", "build")
 
 	return SaveConfig(config, path)

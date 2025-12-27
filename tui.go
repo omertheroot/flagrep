@@ -36,7 +36,6 @@ type TUI struct {
 
 // NewTUI creates a new TUI instance
 func NewTUI(matches []Match) *TUI {
-	// Initialize filtered indices to show all matches
 	indices := make([]int, len(matches))
 	for i := range matches {
 		indices[i] = i
@@ -50,7 +49,6 @@ func NewTUI(matches []Match) *TUI {
 	}
 }
 
-// ANSI escape codes for terminal control
 const (
 	clearScreen    = "\033[2J"
 	moveCursor     = "\033[H"
@@ -76,7 +74,6 @@ const (
 	bgRed          = "\033[41m"
 )
 
-// Terminal size
 type winsize struct {
 	Row    uint16
 	Col    uint16
@@ -96,7 +93,6 @@ func getTerminalSize() (int, int) {
 	return int(ws.Col), int(ws.Row)
 }
 
-// Raw terminal mode
 func (t *TUI) enableRawMode() {
 	syscall.Syscall(syscall.SYS_IOCTL, uintptr(syscall.Stdin), uintptr(syscall.TCGETS), uintptr(unsafe.Pointer(&t.oldTermios)))
 	newTermios := t.oldTermios
@@ -131,16 +127,13 @@ func (t *TUI) Run() {
 		t.handleInput()
 	}
 
-	// Clear screen on exit
 	fmt.Print(clearScreen + moveCursor)
 }
 
-// render displays the current state
 func (t *TUI) render() {
 	width, height := getTerminalSize()
 	fmt.Print(clearScreen + moveCursor)
 
-	// Header
 	headerText := fmt.Sprintf(" FLAGREP TUI │ %d/%d matches ", len(t.filteredIdx), len(t.matches))
 	if t.searchQuery != "" {
 		headerText += fmt.Sprintf("│ Filter: %q ", t.searchQuery)
@@ -160,7 +153,6 @@ func (t *TUI) render() {
 	fmt.Printf("%s%s%s%s%s%s\n", colorBold, bgBlue, colorWhite, strings.Repeat(" ", padding), headerText, strings.Repeat(" ", rightPad))
 	fmt.Print(colorReset)
 
-	// Calculate visible items - each item takes 3 lines (file, decoders, context)
 	linesPerItem := 3
 	reservedLines := 4 // header (1) + empty line before footer (1) + footer separator (1) + footer (1)
 	availableRows := height - reservedLines
@@ -179,10 +171,8 @@ func (t *TUI) render() {
 		endIdx = len(t.filteredIdx)
 	}
 
-	// Track lines used for content
 	linesUsed := 1 // header already printed
 
-	// Display matches
 	if len(t.filteredIdx) == 0 {
 		fmt.Printf("\n%s  No matches found for filter: %q%s\n", colorYellow, t.searchQuery, colorReset)
 		linesUsed += 2

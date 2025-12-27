@@ -12,7 +12,6 @@ import (
 	"strings"
 )
 
-// returns decoded str
 type DecoderFunc func(string) (string, error)
 
 // isPrintableBytes checks if byte slice is mostly printable ASCII (≥70%)
@@ -69,16 +68,13 @@ func spaceRemovalDecoder(input string) (string, error) {
 }
 
 // "SGVsbG8=" -> "Hello"
-// Also finds Base64 segments embedded within text: "random SGVsbG8= text" -> "random Hello text"
 func base64Decoder(input string) (string, error) {
-	// First, try decoding the whole input
 	if data, err := base64.StdEncoding.DecodeString(input); err == nil {
 		if isPrintableBytes(data) {
 			return string(data), nil
 		}
 	}
 
-	// Fall back to finding embedded Base64 segments
 	re := regexp.MustCompile(`[A-Za-z0-9+/]{8,}={0,2}`)
 	matches := re.FindAllStringIndex(input, -1)
 	if len(matches) == 0 {
@@ -115,16 +111,13 @@ func base64Decoder(input string) (string, error) {
 	return result, nil
 }
 
-// Also finds Base64URL segments embedded within text
 func base64URLDecoder(input string) (string, error) {
-	// First, try decoding the whole input
 	if data, err := base64.URLEncoding.DecodeString(input); err == nil {
 		if isPrintableBytes(data) {
 			return string(data), nil
 		}
 	}
 
-	// Fall back to finding embedded Base64URL segments (uses - and _ instead of + and /)
 	re := regexp.MustCompile(`[A-Za-z0-9_-]{8,}={0,2}`)
 	matches := re.FindAllStringIndex(input, -1)
 	if len(matches) == 0 {
@@ -161,16 +154,13 @@ func base64URLDecoder(input string) (string, error) {
 }
 
 // "JBSWY3DP" -> "Hello"
-// Also finds Base32 segments embedded within text
 func base32Decoder(input string) (string, error) {
-	// First, try decoding the whole input
 	if data, err := base32.StdEncoding.DecodeString(strings.ToUpper(input)); err == nil {
 		if isPrintableBytes(data) {
 			return string(data), nil
 		}
 	}
 
-	// Fall back to finding embedded Base32 segments
 	re := regexp.MustCompile(`[A-Z2-7]{8,}={0,6}`)
 	matches := re.FindAllStringIndex(strings.ToUpper(input), -1)
 	if len(matches) == 0 {
@@ -285,9 +275,7 @@ func rot47Decoder(input string) (string, error) {
 }
 
 // "01000001" -> "A"
-// Also finds binary segments embedded within text
 func binaryDecoder(input string) (string, error) {
-	// First, try decoding the whole input
 	clean := strings.ReplaceAll(input, " ", "")
 	clean = strings.ReplaceAll(clean, "\n", "")
 	clean = strings.ReplaceAll(clean, "\r", "")
@@ -353,14 +341,12 @@ func binaryDecoder(input string) (string, error) {
 }
 
 // "101" -> "A"
-// Also finds octal segments embedded within text (space-separated octal bytes)
 func octalDecoder(input string) (string, error) {
 	// Find sequences of space-separated octal values (e.g., "110 145 154 154 157")
 	re := regexp.MustCompile(`\b([0-7]{1,3}(?:\s+[0-7]{1,3})+)\b`)
 	matches := re.FindAllStringIndex(input, -1)
 
 	if len(matches) == 0 {
-		// Try original whole-input approach
 		parts := strings.Fields(input)
 		if len(parts) == 0 {
 			return "", fmt.Errorf("no octal found")
